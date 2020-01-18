@@ -1,7 +1,7 @@
 # jolkien
 
 Linking CMSIS-RTOS2 with rust
-for stm32f743
+for stm32h743
 
 
 
