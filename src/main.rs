@@ -13,31 +13,38 @@ use stm32h7xx_hal::hal::digital::v2::ToggleableOutputPin;
 
 use stm32h7xx_hal::{pac, prelude::*};
 
-use cortex_m_log::println;
-use cortex_m_log::{
-  destination::Itm, printer::itm::InterruptSync as InterruptSyncItm,
-};
+
+#[cfg(debug_assertions)]
+use cortex_m_log::{print, println};
+
+use cortex_m_log::{d_print, d_println};
+
+//use cortex_m_log::{
+//  destination::Itm, printer::itm::InterruptSync as InterruptSyncItm,
+//};
+#[cfg(debug_assertions)]
+use cortex_m_log::printer::semihosting;
 
 #[entry]
 fn main() -> ! {
   let cp = cortex_m::Peripherals::take().unwrap();
   let dp = pac::Peripherals::take().unwrap();
-  let mut log = InterruptSyncItm::new(Itm::new(cp.ITM));
+#[cfg(debug_assertions)]
+  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
+//  let mut log = InterruptSyncItm::new(Itm::new(cp.ITM));
 
   // Constrain and Freeze power
-  println!(log, "Setup PWR...                  ");
+  d_println!(log, "Setup PWR...                  ");
   let pwr = dp.PWR.constrain();
   let vos = pwr.freeze();
 
   // Constrain and Freeze clock
-  println!(log, "Setup RCC...                  ");
+  d_print!(log, "Setup RCC...");
   let rcc = dp.RCC.constrain();
   //use the existing sysclk
   let mut ccdr = rcc.freeze(vos, &dp.SYSCFG);
+  d_println!(log,"done!");
 
-  println!(log, "");
-  println!(log, "started rolkien");
-  println!(log, "");
 
   //access the required GPIO registers
   let gpiob = dp.GPIOB.split(&mut ccdr.ahb4);
@@ -56,6 +63,8 @@ fn main() -> ! {
   led2.set_low().unwrap();
   led3.set_high().unwrap();
 
+  d_println!(log, "LEDs ready");
+
   // Get the delay provider.
   let mut delay = cp.SYST.delay(ccdr.clocks);
   loop {
@@ -64,5 +73,6 @@ fn main() -> ! {
     led1.toggle().unwrap();
     led2.toggle().unwrap();
     led3.toggle().unwrap();
+    //d_print!(log, ".");
   }
 }
