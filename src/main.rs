@@ -10,6 +10,7 @@ use cortex_m_rt::entry;
 
 use stm32h7xx_hal::hal::digital::v2::OutputPin;
 use stm32h7xx_hal::hal::digital::v2::ToggleableOutputPin;
+use stm32h7xx_hal::hal::digital::v2::InputPin;
 
 use stm32h7xx_hal::{pac, prelude::*};
 
@@ -34,9 +35,10 @@ fn main() -> ! {
 //  let mut log = InterruptSyncItm::new(Itm::new(cp.ITM));
 
   // Constrain and Freeze power
-  d_println!(log, "Setup PWR...                  ");
+  d_print!(log, "Setup PWR...");
   let pwr = dp.PWR.constrain();
   let vos = pwr.freeze();
+  d_println!(log,"done!");
 
   // Constrain and Freeze clock
   d_print!(log, "Setup RCC...");
@@ -45,6 +47,8 @@ fn main() -> ! {
   let mut ccdr = rcc.freeze(vos, &dp.SYSCFG);
   d_println!(log,"done!");
 
+
+  d_print!(log, "Setup GPIO...");
 
   //access the required GPIO registers
   let gpiob = dp.GPIOB.split(&mut ccdr.ahb4);
@@ -63,16 +67,24 @@ fn main() -> ! {
   led2.set_low().unwrap();
   led3.set_high().unwrap();
 
-  d_println!(log, "LEDs ready");
+
+  //setup user pushbutton on PC13
+  let gpioc = dp.GPIOC.split(&mut ccdr.ahb4);
+  let user_butt = gpioc.pc13.into_pull_down_input();
+  d_println!(log, "done!");
 
   // Get the delay provider.
   let mut delay = cp.SYST.delay(ccdr.clocks);
   loop {
     //note that when running in debug mode, these delays are plain wrong
     delay.delay_ms(100_u32);
-    led1.toggle().unwrap();
-    led2.toggle().unwrap();
-    led3.toggle().unwrap();
-    //d_print!(log, ".");
+    if !user_butt.is_high().unwrap_or(false) {
+      led1.toggle().unwrap();
+      led2.toggle().unwrap();
+      led3.toggle().unwrap();
+    }
+    else {
+      d_print!(log, ".");
+    }
   }
 }
