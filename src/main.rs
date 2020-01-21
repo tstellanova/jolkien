@@ -14,17 +14,65 @@ use stm32h7xx_hal::hal::digital::v2::InputPin;
 
 use stm32h7xx_hal::{pac, prelude::*};
 
+use cmsis_rtos2;
+
+#[allow(non_upper_case_globals)]
+#[no_mangle]
+pub static SystemCoreClock: u32 = 480000000;
 
 #[cfg(debug_assertions)]
 use cortex_m_log::{print, println};
 
 use cortex_m_log::{d_print, d_println};
-
+// FOR itm mode:
 //use cortex_m_log::{
 //  destination::Itm, printer::itm::InterruptSync as InterruptSyncItm,
 //};
 #[cfg(debug_assertions)]
 use cortex_m_log::printer::semihosting;
+
+
+#[no_mangle]
+pub extern "C" fn start_default_task( _arg: *mut cty::c_void ) {
+  loop {
+    cmsis_rtos2::rtos_os_delay(1); //1 Hz heartbeat
+  }
+}
+
+fn setup_rtos() {
+  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
+
+  d_println!(log, "Setup RTOS...");
+
+  let rc = cmsis_rtos2::rtos_kernel_initialize();
+  d_println!(log, "kernel_initialize rc: {}", rc);
+
+  let default_task_attributes  = cmsis_rtos2::osThreadAttr_t {
+    name: "defaultTask".as_ptr(),
+    attr_bits: 0,
+    cb_mem: core::ptr::null_mut(),
+    cb_size: 0,
+    stack_mem: core::ptr::null_mut(),
+    stack_size: 128,
+    priority:  cmsis_rtos2::osPriority_t_osPriorityNormal,
+    tz_module: 0,
+    reserved: 0,
+  };
+
+  let default_task_handle = cmsis_rtos2::rtos_os_thread_new(
+    Some(start_default_task),
+    core::ptr::null_mut(),
+    &default_task_attributes);
+  if default_task_handle.is_null() {
+    d_println!(log, "rtos_os_thread_new failed!");
+    return;
+  }
+
+  let rc = cmsis_rtos2::rtos_kernel_start();
+  d_println!(log, "kernel_start rc: {}", rc);
+
+  d_println!(log,"RTOS done!");
+}
 
 #[entry]
 fn main() -> ! {
@@ -47,6 +95,7 @@ fn main() -> ! {
   let mut ccdr = rcc.freeze(vos, &dp.SYSCFG);
   d_println!(log,"done!");
 
+  setup_rtos();
 
   d_print!(log, "Setup GPIO...");
 
@@ -72,6 +121,7 @@ fn main() -> ! {
   let gpioc = dp.GPIOC.split(&mut ccdr.ahb4);
   let user_butt = gpioc.pc13.into_pull_down_input();
   d_println!(log, "done!");
+
 
   // Get the delay provider.
   let mut delay = cp.SYST.delay(ccdr.clocks);
