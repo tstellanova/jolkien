@@ -40,7 +40,7 @@ use cortex_m_log::printer::semihosting;
 //use stm32h7xx_hal::pwr::{Pwr, VoltageScale};
 use stm32h7xx_hal::rcc::Ccdr;
 //use stm32h7xx_hal::rcc::CoreClocks;
-use stm32h7xx_hal::rcc::Rcc;
+//use stm32h7xx_hal::rcc::Rcc;
 
 use stm32h7xx_hal::gpio::GpioExt;
 use cmsis_rtos2::{osThreadId_t};
@@ -49,12 +49,12 @@ use cmsis_rtos2::{osThreadId_t};
 //use core::borrow::BorrowMut;
 //use stm32h7::stm32h743::{GPIOB, GPIOC, GPIOE};
 
+#[allow(unused)]
 struct SharedAppContext {
-  rcc: Rcc,
   ccdr: Ccdr,
-  gpiob: stm32h7xx_hal::gpio::gpiob::Parts,
-  gpioc: stm32h7xx_hal::gpio::gpioc::Parts,
-  gpioe: stm32h7xx_hal::gpio::gpioe::Parts,
+//  gpiob: stm32h7xx_hal::gpio::gpiob::Parts,
+//  gpioc: stm32h7xx_hal::gpio::gpioc::Parts,
+//  gpioe: stm32h7xx_hal::gpio::gpioe::Parts,
   user_led1: stm32h7xx_hal::gpio::gpiob::PB0<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>,
   user_led2: stm32h7xx_hal::gpio::gpioe::PE1<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>,
   user_led3: stm32h7xx_hal::gpio::gpiob::PB14<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>,
@@ -100,51 +100,35 @@ fn HardFault(_ef: &ExceptionFrame) -> ! {
 
 
 #[no_mangle]
-extern "C" fn start_default_task(_arg: *mut cty::c_void) {
+extern "C" fn start_default_task(arg: *mut cty::c_void) {
 
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
 
   d_println!(log, "Start default loop...");
 
-  let device_peripherals = pac::Peripherals::take().unwrap();
-  let gpiob = device_peripherals.GPIOB.split(&mut APP_CCDR.unwrap().ahb4);
-  let gpioc = device_peripherals.GPIOC.split(&mut APP_CCDR.unwrap().ahb4);
-  let gpioe = device_peripherals.GPIOE.split(&mut APP_CCDR.unwrap().ahb4);
-
-
-//  gpioa.odr.modify(|_, w| w.odr0().set_bit());
-//
-
-  let mut user_led1:stm32h7xx_hal::gpio::gpiob::PB0<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>> = gpiob.pb0.into_push_pull_output() ;
-  let mut user_led2 = gpioe.pe1.into_push_pull_output();
-  let mut user_led3 = gpiob.pb14.into_push_pull_output();
-  let user_butt = gpioc.pc13.into_pull_down_input() ;
-
-  //set initial states of user LEDs
-  user_led1.set_high().unwrap();
-  user_led2.set_low().unwrap();
-  user_led3.set_high().unwrap();
+//  let mut app_ctx: &mut SharedAppContext = unsafe { &mut *(arg as *mut SharedAppContext) };
+  let app_ctx: &mut SharedAppContext = unsafe { &mut *(arg as *mut SharedAppContext) };
 
   let core_peripherals = cortex_m::Peripherals::take().unwrap();
-  let mut delay = unsafe { core_peripherals.SYST.delay(APP_CORE_CLOCKS.unwrap()) };
+  let mut delay = core_peripherals.SYST.delay(app_ctx.ccdr.clocks);
   loop {
-    let user_butt_pressed = user_butt.is_high().unwrap_or(false) ;
+    let app_ctx: &mut SharedAppContext = unsafe { &mut *(arg as *mut SharedAppContext) };
+    let user_butt_pressed = app_ctx.user_butt.is_high().unwrap_or(false) ;
     if !user_butt_pressed {
-      user_led1.toggle().unwrap();
-      user_led2.toggle().unwrap();
-      user_led3.toggle().unwrap();
+      app_ctx.user_led1.toggle().unwrap();
+      app_ctx.user_led2.toggle().unwrap();
+      app_ctx.user_led3.toggle().unwrap();
     }
     else {
       d_print!(log, ".");
     }
     delay.delay_ms(100_u32);
-    //    cmsis_rtos2::rtos_os_delay(10); //  heartbeat
-
+    //cmsis_rtos2::rtos_os_delay(3); //  heartbeat
   }
 }
 
 
-fn setup_peripherals() {
+fn setup_peripherals() -> SharedAppContext {
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
   d_print!(log, "setup_peripherals...");
   //let core_peripherals = cortex_m::Peripherals::take().unwrap();
@@ -159,25 +143,13 @@ fn setup_peripherals() {
   //use the existing sysclk
   let mut ccdr = rcc.freeze(vos, &device_peripherals.SYSCFG);
 
-  //  let mut syst = core_peripherals.SYST;
-//  core_peripherals.SYST.set_clock_source(SystClkSource::Core);
-//  core_peripherals.SYST.enable_interrupt();
+  let gpiob = device_peripherals.GPIOB.split(&mut ccdr.ahb4);
+  let gpioc = device_peripherals.GPIOC.split(&mut ccdr.ahb4);
+  let gpioe = device_peripherals.GPIOE.split(&mut ccdr.ahb4);
 
-//  let mut nvic = core_peripherals.NVIC;
-//  // PendSV_IRQn =
-//  //PendSV_IRQn                 = -2,     /*!< 14 Cortex-M Pend SV Interrupt
-//  unsafe {
-//    nvic.set_priority(psv, 15);
-//    //  HAL_NVIC_SetPriority(PendSV_IRQn, 15, 0);
-//  }
-
-  let gpiob = device_peripherals.GPIOB.split(&mut APP_CCDR.unwrap().ahb4);
-  let gpioc = device_peripherals.GPIOC.split(&mut APP_CCDR.unwrap().ahb4);
-  let gpioe = device_peripherals.GPIOE.split(&mut APP_CCDR.unwrap().ahb4);
-
-  let mut user_led1= gpiob.pb0.into_push_pull_output();
-  let mut user_led2= gpioe.pe1.into_push_pull_output();
-  let mut user_led3= gpiob.pb14.into_push_pull_output();
+  let mut user_led1 = gpiob.pb0.into_push_pull_output();
+  let mut user_led2 = gpioe.pe1.into_push_pull_output();
+  let mut user_led3 = gpiob.pb14.into_push_pull_output();
   let user_butt= gpioc.pc13.into_pull_down_input();
 
   //set initial states of user LEDs
@@ -186,10 +158,18 @@ fn setup_peripherals() {
   user_led3.set_high().unwrap();
 
   d_println!(log, "done!");
+
+  SharedAppContext {
+    ccdr,
+    user_led1,
+    user_led2,
+    user_led3,
+    user_butt,
+  }
 }
 
 
-fn setup_rtos() -> osThreadId_t {
+fn setup_rtos(app_ctx: &mut SharedAppContext) -> osThreadId_t {
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
 
   d_println!(log, "Setup RTOS...");
@@ -217,11 +197,11 @@ fn setup_rtos() -> osThreadId_t {
 //  };
 
 
-  //let ctx_ptr: *mut cty::c_void = ctx as *mut _ as *mut cty::c_void;
+  let ctx_ptr: *mut cty::c_void = app_ctx as *mut _ as *mut cty::c_void;
 
   let default_task_handle = cmsis_rtos2::rtos_os_thread_new(
     Some(start_default_task),
-     core::ptr::null_mut(),
+    ctx_ptr, //core::ptr::null_mut(),
     core::ptr::null(),
 //    &default_task_attributes
   );
@@ -243,14 +223,15 @@ fn setup_rtos() -> osThreadId_t {
 fn main() -> ! {
   //let core_peripherals = cortex_m::Peripherals::take().unwrap();
 #[cfg(debug_assertions)]
-  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
+//  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
 //  let mut log = InterruptSyncItm::new(Itm::new(cp.ITM));
 
-  setup_peripherals();
-  let default_thread_id = setup_rtos();
+  let mut app_ctx = setup_peripherals();
+  let _default_thread_id = setup_rtos(&mut app_ctx);
 
   loop {
-    cmsis_rtos2::rtos_os_thread_join(default_thread_id);
+    cmsis_rtos2::rtos_os_thread_yield();
+    //cmsis_rtos2::rtos_os_thread_join(default_thread_id);
   }
 
 }
