@@ -7,17 +7,19 @@ extern crate panic_itm;
 
 
 
+use core::cell::RefCell;
+use cortex_m::interrupt::{self, Mutex};
+
 #[macro_use]
 extern crate cortex_m_rt;
 
 use cortex_m_rt::{entry, ExceptionFrame};
 
-//use cortex_m::peripheral::syst::SystClkSource;
 use stm32h7xx_hal::hal::digital::v2::OutputPin;
 use stm32h7xx_hal::hal::digital::v2::ToggleableOutputPin;
 use stm32h7xx_hal::hal::digital::v2::InputPin;
 
-use stm32h7xx_hal::{pac, prelude::*}; //}, Never};
+use stm32h7xx_hal::{pac, prelude::*};
 
 use cmsis_rtos2;
 
@@ -44,91 +46,85 @@ use stm32h7xx_hal::rcc::Ccdr;
 
 use stm32h7xx_hal::gpio::GpioExt;
 use cmsis_rtos2::{osThreadId_t};
-//use core::ptr::null_mut;
-//use stm32h7::stm32h743;
-//use core::borrow::BorrowMut;
-//use stm32h7::stm32h743::{GPIOB, GPIOC, GPIOE};
-
-#[allow(unused)]
-struct SharedAppContext {
-  ccdr: Ccdr,
-//  gpiob: stm32h7xx_hal::gpio::gpiob::Parts,
-//  gpioc: stm32h7xx_hal::gpio::gpioc::Parts,
-//  gpioe: stm32h7xx_hal::gpio::gpioe::Parts,
-  user_led1: stm32h7xx_hal::gpio::gpiob::PB0<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>,
-  user_led2: stm32h7xx_hal::gpio::gpioe::PE1<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>,
-  user_led3: stm32h7xx_hal::gpio::gpiob::PB14<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>,
-  user_butt: stm32h7xx_hal::gpio::gpioc::PC13<stm32h7xx_hal::gpio::Input<stm32h7xx_hal::gpio::PullDown>>,
-
-}
-
-//static APP_CTX: Option<SharedAppContext> = None;
+use core::ops::DerefMut;
 
 
+//TODO this kind of hardcoding is not ergonomic
+type GpioTypeUserLed1 =  stm32h7xx_hal::gpio::gpiob::PB0<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>;
+type GpioTypeUserLed2 =  stm32h7xx_hal::gpio::gpioe::PE1<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>;
+type GpioTypeUserLed3 =  stm32h7xx_hal::gpio::gpiob::PB14<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>;
+type GpioTypeUserButt =  stm32h7xx_hal::gpio::gpioc::PC13<stm32h7xx_hal::gpio::Input<stm32h7xx_hal::gpio::PullDown>>;
 
 
+static APP_CCDR:  Mutex<RefCell< Option< Ccdr >>> = Mutex::new(RefCell::new(None));
+static USER_LED_1:  Mutex<RefCell< Option< GpioTypeUserLed1 >>> = Mutex::new(RefCell::new(None));
+static USER_LED_2:  Mutex<RefCell<Option<GpioTypeUserLed2>>> = Mutex::new(RefCell::new(None));
+static USER_LED_3:  Mutex<RefCell<Option<GpioTypeUserLed3>>> = Mutex::new(RefCell::new(None));
+static USER_BUTT:  Mutex<RefCell<Option<GpioTypeUserButt>>> =  Mutex::new(RefCell::new(None));
 
-//#[exception]
-//#[no_mangle]
-//fn DefaultHandler(arg: i16) -> ! {
-//  let mut err_log =  semihosting::InterruptFree::<_>::stderr().unwrap();
-//  d_println!(err_log, "DefaultHandler {}", arg );
-//  panic!("DefaultHandler");
-//}
 
+// cortex-m-rt is setup to call DefaultHandler for a number of fault conditions
+// we can override this in debug mode for handy debugging
 #[exception]
 fn DefaultHandler(irqn: i16) {
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
   d_println!(log, "IRQn = {}", irqn);
 }
 
-//#[exception]
-//fn SVCall() -> ! {
-//  let mut err_log =  semihosting::InterruptFree::<_>::stdout().unwrap();
-//  d_println!(err_log, " SVCall " );
-//  panic!("o noes");
-//}
 
-
+// cortex-m-rt calls this for serious faults.  can set a breakpoint to debug
 #[exception]
 fn HardFault(_ef: &ExceptionFrame) -> ! {
-
   loop {
 
   }
 }
 
+// Toggle the user leds from their prior state
+fn toggle_leds() {
+  interrupt::free(|cs| {
+    if let Some(ref mut led1) = USER_LED_1.borrow(cs).borrow_mut().deref_mut() {
+      led1.toggle().unwrap();
+    }
+    if let Some(ref mut led2) = USER_LED_2.borrow(cs).borrow_mut().deref_mut() {
+      led2.toggle().unwrap();
+    }
+    if let Some(ref mut led3) = USER_LED_3.borrow(cs).borrow_mut().deref_mut() {
+      led3.toggle().unwrap();
+    }
+  });
+}
 
 #[no_mangle]
-extern "C" fn start_default_task(arg: *mut cty::c_void) {
-
+extern "C" fn start_default_task(_arg: *mut cty::c_void) {
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
-
   d_println!(log, "Start default loop...");
 
-//  let mut app_ctx: &mut SharedAppContext = unsafe { &mut *(arg as *mut SharedAppContext) };
-  let app_ctx: &mut SharedAppContext = unsafe { &mut *(arg as *mut SharedAppContext) };
-
   let core_peripherals = cortex_m::Peripherals::take().unwrap();
-  let mut delay = core_peripherals.SYST.delay(app_ctx.ccdr.clocks);
+  let mut delay = interrupt::free(|cs| {
+    core_peripherals.SYST.delay(APP_CCDR.borrow(cs).borrow().as_ref().unwrap().clocks)
+  });
+
   loop {
-    let app_ctx: &mut SharedAppContext = unsafe { &mut *(arg as *mut SharedAppContext) };
-    let user_butt_pressed = app_ctx.user_butt.is_high().unwrap_or(false) ;
+    // look at user button and if it's NOT pressed, blink the user LEDs
+    let user_butt_pressed = interrupt::free(|cs| {
+      USER_BUTT.borrow(cs).borrow().as_ref().unwrap().is_high().unwrap_or(false)
+    });
+
     if !user_butt_pressed {
-      app_ctx.user_led1.toggle().unwrap();
-      app_ctx.user_led2.toggle().unwrap();
-      app_ctx.user_led3.toggle().unwrap();
+      toggle_leds();
     }
     else {
       d_print!(log, ".");
     }
-    delay.delay_ms(100_u32);
+    delay.delay_ms(10_u32);
+    //TODO try using CMSIS rtos_os_delay instead??
     //cmsis_rtos2::rtos_os_delay(3); //  heartbeat
   }
 }
 
-
-fn setup_peripherals() -> SharedAppContext {
+// Setup peripherals such as GPIO
+fn setup_peripherals()  {
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
   d_print!(log, "setup_peripherals...");
   //let core_peripherals = cortex_m::Peripherals::take().unwrap();
@@ -142,7 +138,6 @@ fn setup_peripherals() -> SharedAppContext {
   let rcc = device_peripherals.RCC.constrain();
   //use the existing sysclk
   let mut ccdr = rcc.freeze(vos, &device_peripherals.SYSCFG);
-
   let gpiob = device_peripherals.GPIOB.split(&mut ccdr.ahb4);
   let gpioc = device_peripherals.GPIOC.split(&mut ccdr.ahb4);
   let gpioe = device_peripherals.GPIOE.split(&mut ccdr.ahb4);
@@ -150,28 +145,30 @@ fn setup_peripherals() -> SharedAppContext {
   let mut user_led1 = gpiob.pb0.into_push_pull_output();
   let mut user_led2 = gpioe.pe1.into_push_pull_output();
   let mut user_led3 = gpiob.pb14.into_push_pull_output();
-  let user_butt= gpioc.pc13.into_pull_down_input();
+  let user_butt = gpioc.pc13.into_pull_down_input();
 
   //set initial states of user LEDs
   user_led1.set_high().unwrap();
   user_led2.set_low().unwrap();
   user_led3.set_high().unwrap();
 
+
+  //store shared peripherals
+  interrupt::free(|cs| {
+    APP_CCDR.borrow(cs).replace(Some(ccdr));
+    USER_LED_1.borrow(cs).replace(Some(user_led1));
+    USER_LED_2.borrow(cs).replace(Some(user_led2));
+    USER_LED_3.borrow(cs).replace(Some(user_led3));
+    USER_BUTT.borrow(cs).replace(Some(user_butt));
+  });
+
   d_println!(log, "done!");
 
-  SharedAppContext {
-    ccdr,
-    user_led1,
-    user_led2,
-    user_led3,
-    user_butt,
-  }
 }
 
 
-fn setup_rtos(app_ctx: &mut SharedAppContext) -> osThreadId_t {
+fn setup_rtos() -> osThreadId_t {
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
-
   d_println!(log, "Setup RTOS...");
 
   let rc = cmsis_rtos2::rtos_kernel_initialize();
@@ -196,16 +193,16 @@ fn setup_rtos(app_ctx: &mut SharedAppContext) -> osThreadId_t {
 //    reserved: 0,
 //  };
 
-
-  let ctx_ptr: *mut cty::c_void = app_ctx as *mut _ as *mut cty::c_void;
-
-  let default_task_handle = cmsis_rtos2::rtos_os_thread_new(
+  // We don't pass context to the default task here, since that involves problematic
+  // casting to/from C void pointers; instead, we use global static context.
+  let default_thread_id = cmsis_rtos2::rtos_os_thread_new(
     Some(start_default_task),
-    ctx_ptr, //core::ptr::null_mut(),
+    core::ptr::null_mut(),
     core::ptr::null(),
 //    &default_task_attributes
   );
-  if default_task_handle.is_null() {
+
+  if default_thread_id.is_null() {
     d_println!(log, "rtos_os_thread_new failed!");
     return core::ptr::null_mut()
   }
@@ -216,21 +213,19 @@ fn setup_rtos(app_ctx: &mut SharedAppContext) -> osThreadId_t {
 
   d_println!(log,"RTOS done!");
 
-  default_task_handle
+  default_thread_id
 }
 
 #[entry]
 fn main() -> ! {
-  //let core_peripherals = cortex_m::Peripherals::take().unwrap();
-#[cfg(debug_assertions)]
-//  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
-//  let mut log = InterruptSyncItm::new(Itm::new(cp.ITM));
 
-  let mut app_ctx = setup_peripherals();
-  let _default_thread_id = setup_rtos(&mut app_ctx);
+  setup_peripherals();
+  let _default_thread_id = setup_rtos();
 
   loop {
     cmsis_rtos2::rtos_os_thread_yield();
+
+    //This is not provided by the ordinary FreeRTOS port:
     //cmsis_rtos2::rtos_os_thread_join(default_thread_id);
   }
 
