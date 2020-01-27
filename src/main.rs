@@ -25,8 +25,8 @@ use cmsis_rtos2;
 
 #[allow(non_upper_case_globals)]
 #[no_mangle]
-//pub static SystemCoreClock: u32 = 480000000;
-pub static SystemCoreClock: u32 = 400000000;
+pub static SystemCoreClock: u32 = 480000000;
+//pub static SystemCoreClock: u32 = 400000000;
 
 #[cfg(debug_assertions)]
 use cortex_m_log::{print, println};
@@ -117,9 +117,9 @@ extern "C" fn start_default_task(_arg: *mut cty::c_void) {
     else {
       d_print!(log, ".");
     }
-    delay.delay_ms(10_u32);
-    //TODO try using CMSIS rtos_os_delay instead??
-    //cmsis_rtos2::rtos_os_delay(3); //  heartbeat
+    // note: this delay is not accurate in debug mode with semihosting activated
+    delay.delay_ms(5_u32);
+    //TODO figure out why cmsis_rtos2::rtos_os_delay never fires?
   }
 }
 
@@ -224,9 +224,6 @@ fn main() -> ! {
 
   loop {
     cmsis_rtos2::rtos_os_thread_yield();
-
-    //This is not provided by the ordinary FreeRTOS port:
-    //cmsis_rtos2::rtos_os_thread_join(default_thread_id);
   }
 
 }
