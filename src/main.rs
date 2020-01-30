@@ -66,9 +66,11 @@ static USER_BUTT:  Mutex<RefCell<Option<GpioTypeUserButt>>> =  Mutex::new(RefCel
 // cortex-m-rt is setup to call DefaultHandler for a number of fault conditions
 // we can override this in debug mode for handy debugging
 #[exception]
-fn DefaultHandler(irqn: i16) {
-  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
-  d_println!(log, "IRQn = {}", irqn);
+fn DefaultHandler(_irqn: i16) {
+  #[cfg(debug_assertions)]
+  let mut log = semihosting::InterruptFree::<_>::stdout().unwrap();
+  d_println!(log, "IRQn = {}", _irqn);
+
 }
 
 
@@ -97,6 +99,7 @@ fn toggle_leds() {
 
 #[no_mangle]
 extern "C" fn start_default_task(_arg: *mut cty::c_void) {
+  #[cfg(debug_assertions)]
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
   d_println!(log, "Start default loop...");
 
@@ -118,13 +121,14 @@ extern "C" fn start_default_task(_arg: *mut cty::c_void) {
       d_print!(log, ".");
     }
     // note: this delay is not accurate in debug mode with semihosting activated
-    delay.delay_ms(5_u32);
+    delay.delay_ms(100_u32);
     //TODO figure out why cmsis_rtos2::rtos_os_delay never fires?
   }
 }
 
 // Setup peripherals such as GPIO
 fn setup_peripherals()  {
+  #[cfg(debug_assertions)]
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
   d_print!(log, "setup_peripherals...");
   //let core_peripherals = cortex_m::Peripherals::take().unwrap();
@@ -168,17 +172,18 @@ fn setup_peripherals()  {
 
 
 fn setup_rtos() -> osThreadId_t {
+  #[cfg(debug_assertions)]
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
   d_println!(log, "Setup RTOS...");
 
-  let rc = cmsis_rtos2::rtos_kernel_initialize();
-  d_println!(log, "kernel_initialize rc: {}", rc);
+  let _rc = cmsis_rtos2::rtos_kernel_initialize();
+  d_println!(log, "kernel_initialize rc: {}", _rc);
 
-  let tick_hz = cmsis_rtos2::rtos_kernel_get_tick_freq_hz();
-  d_println!(log, "tick_hz : {}", tick_hz);
+  let _tick_hz = cmsis_rtos2::rtos_kernel_get_tick_freq_hz();
+  d_println!(log, "tick_hz : {}", _tick_hz);
 
-  let sys_timer_hz = cmsis_rtos2::rtos_kernel_get_sys_timer_freq_hz();
-  d_println!(log, "sys_timer_hz : {}", sys_timer_hz);
+  let _sys_timer_hz = cmsis_rtos2::rtos_kernel_get_sys_timer_freq_hz();
+  d_println!(log, "sys_timer_hz : {}", _sys_timer_hz);
 
 
 //  let default_task_attributes  = cmsis_rtos2::osThreadAttr_t {
@@ -208,8 +213,8 @@ fn setup_rtos() -> osThreadId_t {
   }
   d_println!(log, "rtos_os_thread_new ok! ");
 
-  let rc = cmsis_rtos2::rtos_kernel_start();
-  d_println!(log, "kernel_start rc: {}", rc);
+  let _rc = cmsis_rtos2::rtos_kernel_start();
+  d_println!(log, "kernel_start rc: {}", _rc);
 
   d_println!(log,"RTOS done!");
 
