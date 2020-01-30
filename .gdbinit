@@ -10,5 +10,17 @@ monitor arm semihosting enable
 #monitor itm port 0 on
 
 load
+set breakpoint pending on
+#b vPortSVCHandler
+b DefaultHandler
+#b SVCall
+b rust_begin_unwind
+b HardFault
+#b SVC_Handler
+#b PendSV_Handler
+#b vPortSVCHandler
+#b xPortPendSVHandler
+
+
 continue
 
