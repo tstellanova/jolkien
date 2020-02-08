@@ -33,9 +33,9 @@ use cmsis_rtos2;
 
 #[allow(non_upper_case_globals)]
 #[no_mangle]
-//pub static SystemCoreClock: u32 = 48000000; // stm32h743 HSI 48 MHz
-pub static SystemCoreClock: u32 = 16_000_000; //stm32f4xx_hal rcc::HSI
-  ///25000000; //stm32f401cc board with 25 MHz xtal
+pub static SystemCoreClock: u32 = 16_000_000; //or use stm32f4xx_hal rcc::HSI
+//Can use 25_000_000 on an stm32f401 board with 25 MHz xtal
+// 48_000_000 for stm32h743 HSI (48 MHz)
 
 #[cfg(debug_assertions)]
 use cortex_m_log::{print, println};
@@ -48,6 +48,10 @@ use cortex_m_log::{d_print, d_println};
 #[cfg(debug_assertions)]
 use cortex_m_log::printer::semihosting;
 
+#[cfg(debug_assertions)]
+use cortex_m_semihosting;
+
+
 //use processor_hal::pwr::{Pwr, VoltageScale};
 
 //use processor_hal::rcc::Ccdr;
@@ -59,11 +63,13 @@ use processor_hal::rcc::Clocks;
 use processor_hal::gpio::GpioExt;
 use processor_hal::rcc::RccExt;
 
-use cmsis_rtos2::{osThreadId_t};
+//use cmsis_rtos2::{osThreadId_t};
 use core::ops::DerefMut;
 
 use processor_hal::{prelude::*, stm32};
 
+#[cfg(debug_assertions)]
+type DebugLog = cortex_m_log::printer::semihosting::Semihosting<cortex_m_log::modes::InterruptFree, cortex_m_semihosting::hio::HStdout>;
 
 //TODO this kind of hardcoding is not ergonomic
 
@@ -76,9 +82,7 @@ static USER_LED_1:  Mutex<RefCell<Option< GpioTypeUserLed1>>> = Mutex::new(RefCe
 // we can override this in debug mode for handy debugging
 #[exception]
 fn DefaultHandler(_irqn: i16) {
-  #[cfg(debug_assertions)]
-  let mut log = semihosting::InterruptFree::<_>::stdout().unwrap();
-  d_println!(log, "IRQn = {}", _irqn);
+  d_println!(get_debug_log(), "IRQn = {}", _irqn);
 
 }
 
@@ -91,46 +95,77 @@ fn HardFault(_ef: &ExceptionFrame) -> ! {
   }
 }
 
+
+/// Used in debug builds to provide a logging outlet
+#[cfg(debug_assertions)]
+fn get_debug_log() -> DebugLog {
+  semihosting::InterruptFree::<_>::stdout().unwrap()
+}
+
 // Toggle the user leds from their prior state
 fn toggle_leds() {
   interrupt::free(|cs| {
     if let Some(ref mut led1) = USER_LED_1.borrow(cs).borrow_mut().deref_mut() {
       led1.toggle().unwrap();
     }
-//    if let Some(ref mut led2) = USER_LED_2.borrow(cs).borrow_mut().deref_mut() {
-//      led2.toggle().unwrap();
-//    }
-//    if let Some(ref mut led3) = USER_LED_3.borrow(cs).borrow_mut().deref_mut() {
-//      led3.toggle().unwrap();
-//    }
+
   });
+}
+
+/// RTOS calls this function to run the default task
+#[no_mangle]
+extern "C" fn start_default_task(_arg: *mut cty::c_void) {
+  d_println!(get_debug_log(), "Start default loop...");
+
+//  let core_peripherals = cortex_m::Peripherals::take().unwrap();
+//  let mut delay = interrupt::free(|cs| {
+//    processor_hal::delay::Delay::new(core_peripherals.SYST, *APP_CLOCKS.borrow(cs).borrow().as_ref().unwrap())
+//  });
+
+//  loop {
+////    toggle_leds();
+//
+//    // note: this delay is not accurate in debug mode with semihosting activated
+//    //delay.delay_ms(100_u32);
+//    cmsis_rtos2::rtos_os_thread_yield();
+//    //TODO figure out why cmsis_rtos2::rtos_os_delay never fires?
+//  }
 }
 
 #[no_mangle]
-extern "C" fn start_default_task(_arg: *mut cty::c_void) {
-  #[cfg(debug_assertions)]
-  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
-  d_println!(log, "Start default loop...");
-
-  let core_peripherals = cortex_m::Peripherals::take().unwrap();
-  let mut delay = interrupt::free(|cs| {
-    processor_hal::delay::Delay::new(core_peripherals.SYST, *APP_CLOCKS.borrow(cs).borrow().as_ref().unwrap())
-  });
-
-  loop {
-    toggle_leds();
-
-    // note: this delay is not accurate in debug mode with semihosting activated
-    delay.delay_ms(100_u32);
-    //TODO figure out why cmsis_rtos2::rtos_os_delay never fires?
-  }
+extern "C" fn repeating_timer_task(_arg: *mut cty::c_void) {
+  toggle_leds();
+  //d_print!(get_debug_log(), ".");
 }
+
+
+fn setup_repeating_timer() {
+  let tid = cmsis_rtos2::rtos_os_timer_new(
+    Some(repeating_timer_task),
+    cmsis_rtos2::osTimerType_t_osTimerPeriodic,
+    core::ptr::null_mut(),
+    core::ptr::null(),
+  );
+
+  if tid.is_null() {
+    d_println!(get_debug_log(), "setup_repeating_timer failed...");
+  }
+  else {
+    let rc = cmsis_rtos2::rtos_os_timer_start(tid, 100);
+    if 0 != rc {
+      d_println!(get_debug_log(), "rtos_os_timer_start failed {:?}", rc);
+    }
+    else {
+      d_println!(get_debug_log(),"valid timer: {:?}", tid);
+    }
+  }
+
+}
+
 
 // Setup peripherals such as GPIO
 fn setup_peripherals()  {
-  #[cfg(debug_assertions)]
-  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
-  d_print!(log, "setup_peripherals...");
+  d_print!(get_debug_log(), "setup_peripherals...");
 
   let dp = stm32::Peripherals::take().unwrap();
 
@@ -152,24 +187,22 @@ fn setup_peripherals()  {
     USER_LED_1.borrow(cs).replace(Some(user_led1));
   });
 
-  d_println!(log, "done!");
+  d_println!(get_debug_log(), "done!");
 
 }
 
 
-fn setup_rtos() -> osThreadId_t {
-  #[cfg(debug_assertions)]
-  let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
-  d_println!(log, "Setup RTOS...");
+fn setup_rtos() {
+//  d_println!(get_debug_log(), "Setup RTOS...");
 
   let _rc = cmsis_rtos2::rtos_kernel_initialize();
-  d_println!(log, "kernel_initialize rc: {}", _rc);
+//  d_println!(get_debug_log(), "kernel_initialize rc: {}", _rc);
 
   let _tick_hz = cmsis_rtos2::rtos_kernel_get_tick_freq_hz();
-  d_println!(log, "tick_hz : {}", _tick_hz);
+//  d_println!(get_debug_log(), "tick_hz : {}", _tick_hz);
 
   let _sys_timer_hz = cmsis_rtos2::rtos_kernel_get_sys_timer_freq_hz();
-  d_println!(log, "sys_timer_hz : {}", _sys_timer_hz);
+//  d_println!(get_debug_log(), "sys_timer_hz : {}", _sys_timer_hz);
 
 
 //  let default_task_attributes  = cmsis_rtos2::osThreadAttr_t {
@@ -186,32 +219,32 @@ fn setup_rtos() -> osThreadId_t {
 
   // We don't pass context to the default task here, since that involves problematic
   // casting to/from C void pointers; instead, we use global static context.
-  let default_thread_id = cmsis_rtos2::rtos_os_thread_new(
-    Some(start_default_task),
-    core::ptr::null_mut(),
-    core::ptr::null(),
-//    &default_task_attributes
-  );
+//  let default_thread_id = cmsis_rtos2::rtos_os_thread_new(
+//    Some(start_default_task),
+//    core::ptr::null_mut(),
+//    core::ptr::null(),
+//  );
+//
+//  if default_thread_id.is_null() {
+//    d_println!(get_debug_log(), "rtos_os_thread_new failed!");
+//    return core::ptr::null_mut()
+//  }
+  //d_println!(get_debug_log(), "rtos_os_thread_new ok! ");
 
-  if default_thread_id.is_null() {
-    d_println!(log, "rtos_os_thread_new failed!");
-    return core::ptr::null_mut()
-  }
-  d_println!(log, "rtos_os_thread_new ok! ");
+  setup_repeating_timer();
 
   let _rc = cmsis_rtos2::rtos_kernel_start();
-  d_println!(log, "kernel_start rc: {}", _rc);
+  d_println!(get_debug_log(), "kernel_start rc: {}", _rc);
 
-  d_println!(log,"RTOS done!");
+  //d_println!(get_debug_log(),"RTOS done!");
 
-  default_thread_id
 }
 
 #[entry]
 fn main() -> ! {
 
   setup_peripherals();
-  let _default_thread_id = setup_rtos();
+  setup_rtos();
 
   loop {
     cmsis_rtos2::rtos_os_thread_yield();
