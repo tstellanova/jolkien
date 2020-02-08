@@ -3,30 +3,39 @@
 #![no_main]
 #![no_std]
 
-extern crate panic_itm;
+//extern crate panic_itm;
 
+extern crate panic_semihosting;
 
 
 use core::cell::RefCell;
 use cortex_m::interrupt::{self, Mutex};
+
+//use stm32h7xx_hal as processor_hal;
+use stm32f4xx_hal as processor_hal;
+
+//use stm32h7xx_hal::pac as pac;
+
+
+
 
 #[macro_use]
 extern crate cortex_m_rt;
 
 use cortex_m_rt::{entry, ExceptionFrame};
 
-use stm32h7xx_hal::hal::digital::v2::OutputPin;
-use stm32h7xx_hal::hal::digital::v2::ToggleableOutputPin;
-use stm32h7xx_hal::hal::digital::v2::InputPin;
+//use processor_hal::hal::digital::v2::OutputPin;
+use processor_hal::hal::digital::v2::ToggleableOutputPin;
+//use processor_hal::hal::digital::v2::InputPin;
 
-use stm32h7xx_hal::{pac, prelude::*};
 
 use cmsis_rtos2;
 
 #[allow(non_upper_case_globals)]
 #[no_mangle]
-pub static SystemCoreClock: u32 = 480000000;
-//pub static SystemCoreClock: u32 = 400000000;
+//pub static SystemCoreClock: u32 = 48000000; // stm32h743 HSI 48 MHz
+pub static SystemCoreClock: u32 = 16_000_000; //stm32f4xx_hal rcc::HSI
+  ///25000000; //stm32f401cc board with 25 MHz xtal
 
 #[cfg(debug_assertions)]
 use cortex_m_log::{print, println};
@@ -39,28 +48,39 @@ use cortex_m_log::{d_print, d_println};
 #[cfg(debug_assertions)]
 use cortex_m_log::printer::semihosting;
 
-//use stm32h7xx_hal::pwr::{Pwr, VoltageScale};
-use stm32h7xx_hal::rcc::Ccdr;
-//use stm32h7xx_hal::rcc::CoreClocks;
-//use stm32h7xx_hal::rcc::Rcc;
+//use processor_hal::pwr::{Pwr, VoltageScale};
 
-use stm32h7xx_hal::gpio::GpioExt;
+//use processor_hal::rcc::Ccdr;
+use processor_hal::rcc::Clocks;
+
+//use processor_hal::rcc::CoreClocks;
+//use processor_hal::rcc::Rcc;
+
+use processor_hal::gpio::GpioExt;
+use processor_hal::rcc::RccExt;
+
 use cmsis_rtos2::{osThreadId_t};
 use core::ops::DerefMut;
 
+use processor_hal::{prelude::*, stm32};
+
 
 //TODO this kind of hardcoding is not ergonomic
-type GpioTypeUserLed1 =  stm32h7xx_hal::gpio::gpiob::PB0<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>;
-type GpioTypeUserLed2 =  stm32h7xx_hal::gpio::gpioe::PE1<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>;
-type GpioTypeUserLed3 =  stm32h7xx_hal::gpio::gpiob::PB14<stm32h7xx_hal::gpio::Output<stm32h7xx_hal::gpio::PushPull>>;
-type GpioTypeUserButt =  stm32h7xx_hal::gpio::gpioc::PC13<stm32h7xx_hal::gpio::Input<stm32h7xx_hal::gpio::PullDown>>;
+
+type GpioTypeUserLed1 =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
+
+// stm32h743 dev board:
+//type GpioTypeUserLed1 =  processor_hal::gpio::gpiob::PB0<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
+//type GpioTypeUserLed2 =  processor_hal::gpio::gpioe::PE1<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
+//type GpioTypeUserLed3 =  processor_hal::gpio::gpiob::PB14<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
+//type GpioTypeUserButt =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::Input<processor_hal::gpio::PullDown>>;
 
 
-static APP_CCDR:  Mutex<RefCell< Option< Ccdr >>> = Mutex::new(RefCell::new(None));
-static USER_LED_1:  Mutex<RefCell< Option< GpioTypeUserLed1 >>> = Mutex::new(RefCell::new(None));
-static USER_LED_2:  Mutex<RefCell<Option<GpioTypeUserLed2>>> = Mutex::new(RefCell::new(None));
-static USER_LED_3:  Mutex<RefCell<Option<GpioTypeUserLed3>>> = Mutex::new(RefCell::new(None));
-static USER_BUTT:  Mutex<RefCell<Option<GpioTypeUserButt>>> =  Mutex::new(RefCell::new(None));
+static APP_CCDR:  Mutex<RefCell< Option< Clocks >>> = Mutex::new(RefCell::new(None));
+static USER_LED_1:  Mutex<RefCell<Option< GpioTypeUserLed1>>> = Mutex::new(RefCell::new(None));
+//static USER_LED_2:  Mutex<RefCell<Option<GpioTypeUserLed2>>> = Mutex::new(RefCell::new(None));
+//static USER_LED_3:  Mutex<RefCell<Option<GpioTypeUserLed3>>> = Mutex::new(RefCell::new(None));
+//static USER_BUTT:  Mutex<RefCell<Option<GpioTypeUserButt>>> =  Mutex::new(RefCell::new(None));
 
 
 // cortex-m-rt is setup to call DefaultHandler for a number of fault conditions
@@ -88,12 +108,12 @@ fn toggle_leds() {
     if let Some(ref mut led1) = USER_LED_1.borrow(cs).borrow_mut().deref_mut() {
       led1.toggle().unwrap();
     }
-    if let Some(ref mut led2) = USER_LED_2.borrow(cs).borrow_mut().deref_mut() {
-      led2.toggle().unwrap();
-    }
-    if let Some(ref mut led3) = USER_LED_3.borrow(cs).borrow_mut().deref_mut() {
-      led3.toggle().unwrap();
-    }
+//    if let Some(ref mut led2) = USER_LED_2.borrow(cs).borrow_mut().deref_mut() {
+//      led2.toggle().unwrap();
+//    }
+//    if let Some(ref mut led3) = USER_LED_3.borrow(cs).borrow_mut().deref_mut() {
+//      led3.toggle().unwrap();
+//    }
   });
 }
 
@@ -105,21 +125,26 @@ extern "C" fn start_default_task(_arg: *mut cty::c_void) {
 
   let core_peripherals = cortex_m::Peripherals::take().unwrap();
   let mut delay = interrupt::free(|cs| {
-    core_peripherals.SYST.delay(APP_CCDR.borrow(cs).borrow().as_ref().unwrap().clocks)
+    processor_hal::delay::Delay::new(core_peripherals.SYST, *APP_CCDR.borrow(cs).borrow().as_ref().unwrap())
+
+
+       // delay(APP_CCDR.borrow(cs).borrow().as_ref().unwrap())
   });
 
   loop {
-    // look at user button and if it's NOT pressed, blink the user LEDs
-    let user_butt_pressed = interrupt::free(|cs| {
-      USER_BUTT.borrow(cs).borrow().as_ref().unwrap().is_high().unwrap_or(false)
-    });
+    toggle_leds();
 
-    if !user_butt_pressed {
-      toggle_leds();
-    }
-    else {
-      d_print!(log, ".");
-    }
+//    // look at user button and if it's NOT pressed, blink the user LEDs
+//    let user_butt_pressed = interrupt::free(|cs| {
+//      USER_BUTT.borrow(cs).borrow().as_ref().unwrap().is_high().unwrap_or(false)
+//    });
+//
+//    if !user_butt_pressed {
+//      toggle_leds();
+//    }
+//    else {
+//      d_print!(log, ".");
+//    }
     // note: this delay is not accurate in debug mode with semihosting activated
     delay.delay_ms(100_u32);
     //TODO figure out why cmsis_rtos2::rtos_os_delay never fires?
@@ -131,39 +156,24 @@ fn setup_peripherals()  {
   #[cfg(debug_assertions)]
   let mut log =  semihosting::InterruptFree::<_>::stdout().unwrap();
   d_print!(log, "setup_peripherals...");
-  //let core_peripherals = cortex_m::Peripherals::take().unwrap();
 
-  let device_peripherals = pac::Peripherals::take().unwrap();
+  let dp = stm32::Peripherals::take().unwrap();
 
-  let pwr = device_peripherals.PWR.constrain();
-  let vos = pwr.freeze();
+  let gpioc = dp.GPIOC.split();
+  let mut user_led1 = gpioc.pc13.into_push_pull_output();
 
-  // Constrain and Freeze clock
-  let rcc = device_peripherals.RCC.constrain();
-  //use the existing sysclk
-  let mut ccdr = rcc.freeze(vos, &device_peripherals.SYSCFG);
-  let gpiob = device_peripherals.GPIOB.split(&mut ccdr.ahb4);
-  let gpioc = device_peripherals.GPIOC.split(&mut ccdr.ahb4);
-  let gpioe = device_peripherals.GPIOE.split(&mut ccdr.ahb4);
-
-  let mut user_led1 = gpiob.pb0.into_push_pull_output();
-  let mut user_led2 = gpioe.pe1.into_push_pull_output();
-  let mut user_led3 = gpiob.pb14.into_push_pull_output();
-  let user_butt = gpioc.pc13.into_pull_down_input();
+  // Set up the system clock at 16 MHz
+  let rcc = dp.RCC.constrain();
+  let clocks = rcc.cfgr.sysclk(16.mhz()).freeze();
 
   //set initial states of user LEDs
   user_led1.set_high().unwrap();
-  user_led2.set_low().unwrap();
-  user_led3.set_high().unwrap();
 
 
   //store shared peripherals
   interrupt::free(|cs| {
-    APP_CCDR.borrow(cs).replace(Some(ccdr));
+    APP_CCDR.borrow(cs).replace(Some(clocks));
     USER_LED_1.borrow(cs).replace(Some(user_led1));
-    USER_LED_2.borrow(cs).replace(Some(user_led2));
-    USER_LED_3.borrow(cs).replace(Some(user_led3));
-    USER_BUTT.borrow(cs).replace(Some(user_butt));
   });
 
   d_println!(log, "done!");
