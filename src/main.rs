@@ -69,19 +69,8 @@ use processor_hal::{prelude::*, stm32};
 
 type GpioTypeUserLed1 =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
 
-// stm32h743 dev board:
-//type GpioTypeUserLed1 =  processor_hal::gpio::gpiob::PB0<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
-//type GpioTypeUserLed2 =  processor_hal::gpio::gpioe::PE1<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
-//type GpioTypeUserLed3 =  processor_hal::gpio::gpiob::PB14<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
-//type GpioTypeUserButt =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::Input<processor_hal::gpio::PullDown>>;
-
-
-static APP_CCDR:  Mutex<RefCell< Option< Clocks >>> = Mutex::new(RefCell::new(None));
+static APP_CLOCKS:  Mutex<RefCell< Option< Clocks >>> = Mutex::new(RefCell::new(None));
 static USER_LED_1:  Mutex<RefCell<Option< GpioTypeUserLed1>>> = Mutex::new(RefCell::new(None));
-//static USER_LED_2:  Mutex<RefCell<Option<GpioTypeUserLed2>>> = Mutex::new(RefCell::new(None));
-//static USER_LED_3:  Mutex<RefCell<Option<GpioTypeUserLed3>>> = Mutex::new(RefCell::new(None));
-//static USER_BUTT:  Mutex<RefCell<Option<GpioTypeUserButt>>> =  Mutex::new(RefCell::new(None));
-
 
 // cortex-m-rt is setup to call DefaultHandler for a number of fault conditions
 // we can override this in debug mode for handy debugging
@@ -125,26 +114,12 @@ extern "C" fn start_default_task(_arg: *mut cty::c_void) {
 
   let core_peripherals = cortex_m::Peripherals::take().unwrap();
   let mut delay = interrupt::free(|cs| {
-    processor_hal::delay::Delay::new(core_peripherals.SYST, *APP_CCDR.borrow(cs).borrow().as_ref().unwrap())
-
-
-       // delay(APP_CCDR.borrow(cs).borrow().as_ref().unwrap())
+    processor_hal::delay::Delay::new(core_peripherals.SYST, *APP_CLOCKS.borrow(cs).borrow().as_ref().unwrap())
   });
 
   loop {
     toggle_leds();
 
-//    // look at user button and if it's NOT pressed, blink the user LEDs
-//    let user_butt_pressed = interrupt::free(|cs| {
-//      USER_BUTT.borrow(cs).borrow().as_ref().unwrap().is_high().unwrap_or(false)
-//    });
-//
-//    if !user_butt_pressed {
-//      toggle_leds();
-//    }
-//    else {
-//      d_print!(log, ".");
-//    }
     // note: this delay is not accurate in debug mode with semihosting activated
     delay.delay_ms(100_u32);
     //TODO figure out why cmsis_rtos2::rtos_os_delay never fires?
@@ -164,7 +139,8 @@ fn setup_peripherals()  {
 
   // Set up the system clock at 16 MHz
   let rcc = dp.RCC.constrain();
-  let clocks = rcc.cfgr.sysclk(16.mhz()).freeze();
+  let clocks = rcc.cfgr.freeze();
+//  let clocks = rcc.cfgr.sysclk(16.mhz()).freeze();
 
   //set initial states of user LEDs
   user_led1.set_high().unwrap();
@@ -172,7 +148,7 @@ fn setup_peripherals()  {
 
   //store shared peripherals
   interrupt::free(|cs| {
-    APP_CCDR.borrow(cs).replace(Some(clocks));
+    APP_CLOCKS.borrow(cs).replace(Some(clocks));
     USER_LED_1.borrow(cs).replace(Some(user_led1));
   });
 
