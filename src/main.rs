@@ -64,9 +64,10 @@ use processor_hal::gpio::GpioExt;
 use processor_hal::rcc::RccExt;
 
 //use cmsis_rtos2::{osThreadId_t};
-use core::ops::DerefMut;
+use core::ops::{DerefMut};
 
 use processor_hal::{prelude::*, stm32};
+//use core::ptr::null;
 
 #[cfg(debug_assertions)]
 type DebugLog = cortex_m_log::printer::semihosting::Semihosting<cortex_m_log::modes::InterruptFree, cortex_m_semihosting::hio::HStdout>;
@@ -77,6 +78,8 @@ type GpioTypeUserLed1 =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::O
 
 static APP_CLOCKS:  Mutex<RefCell< Option< Clocks >>> = Mutex::new(RefCell::new(None));
 static USER_LED_1:  Mutex<RefCell<Option< GpioTypeUserLed1>>> = Mutex::new(RefCell::new(None));
+
+//static GLOBAL_QUEUE_HANDLE: Mutex<RefCell<Option< cmsis_rtos2::osMessageQueueId_t  >>> = Mutex::new(RefCell::new(None));
 
 // cortex-m-rt is setup to call DefaultHandler for a number of fault conditions
 // we can override this in debug mode for handy debugging
@@ -108,28 +111,28 @@ fn toggle_leds() {
     if let Some(ref mut led1) = USER_LED_1.borrow(cs).borrow_mut().deref_mut() {
       led1.toggle().unwrap();
     }
-
   });
 }
 
 /// RTOS calls this function to run the default task
 #[no_mangle]
-extern "C" fn start_default_task(_arg: *mut cty::c_void) {
-  d_println!(get_debug_log(), "Start default loop...");
+extern "C" fn task1_cb(_arg: *mut cty::c_void) {
+  //d_println!(get_debug_log(), "task1");
 
-//  let core_peripherals = cortex_m::Peripherals::take().unwrap();
-//  let mut delay = interrupt::free(|cs| {
-//    processor_hal::delay::Delay::new(core_peripherals.SYST, *APP_CLOCKS.borrow(cs).borrow().as_ref().unwrap())
-//  });
+  loop {
+    cmsis_rtos2::rtos_os_delay(100);
+  }
+  
+}
 
-//  loop {
-////    toggle_leds();
-//
-//    // note: this delay is not accurate in debug mode with semihosting activated
-//    //delay.delay_ms(100_u32);
-//    cmsis_rtos2::rtos_os_thread_yield();
-//    //TODO figure out why cmsis_rtos2::rtos_os_delay never fires?
-//  }
+#[no_mangle]
+extern "C" fn task2_cb(_arg: *mut cty::c_void) {
+  //d_println!(get_debug_log(), "task2");
+
+  loop {
+    cmsis_rtos2::rtos_os_delay(250);
+  }
+
 }
 
 #[no_mangle]
@@ -151,7 +154,7 @@ fn setup_repeating_timer() {
     d_println!(get_debug_log(), "setup_repeating_timer failed...");
   }
   else {
-    let rc = cmsis_rtos2::rtos_os_timer_start(tid, 100);
+    let rc = cmsis_rtos2::rtos_os_timer_start(tid, 50);
     if 0 != rc {
       d_println!(get_debug_log(), "rtos_os_timer_start failed {:?}", rc);
     }
@@ -162,6 +165,55 @@ fn setup_repeating_timer() {
 
 }
 
+pub fn setup_default_threads() {
+//  let default_task_attributes  = cmsis_rtos2::osThreadAttr_t {
+//    name: "defaultTask/0".as_ptr(),
+//    attr_bits: 0,
+//    cb_mem: core::ptr::null_mut(),
+//    cb_size: 0,
+//    stack_mem: core::ptr::null_mut(),
+//    stack_size: 128,
+//    priority:  cmsis_rtos2::osPriority_t_osPriorityIdle,
+//    tz_module: 0,
+//    reserved: 0,
+//  };
+
+//  //create a shared msg queue
+//  let mq_id = cmsis_rtos2::rtos_os_msg_queue_new(512, 1, null());
+//  if mq_id.is_null() {
+//    d_println!(get_debug_log(), "rtos_os_msg_queue_new failed");
+//    return;
+//  }
+//  else {
+//    d_println!(get_debug_log(), "new queue: {:?}", mq_id);
+//  }
+
+//  interrupt::free(|cs| {
+//    GLOBAL_QUEUE_HANDLE.borrow(cs).replace(Some(mq_id));
+//  });
+
+  // We don't pass context to the default task here, since that involves problematic
+  // casting to/from C void pointers; instead, we use global static context.
+  let thread1_id = cmsis_rtos2::rtos_os_thread_new(
+    Some(task1_cb),
+    core::ptr::null_mut(),
+    core::ptr::null(),
+  );
+  if thread1_id.is_null() {
+    d_println!(get_debug_log(), "rtos_os_thread_new failed!");
+    return;
+  }
+
+  let thread2_id = cmsis_rtos2::rtos_os_thread_new(
+    Some(task2_cb),
+    core::ptr::null_mut(),
+    core::ptr::null(),
+  );
+  if thread2_id.is_null() {
+    d_println!(get_debug_log(), "rtos_os_thread_new failed!");
+    return;
+  }
+}
 
 // Setup peripherals such as GPIO
 fn setup_peripherals()  {
@@ -205,33 +257,8 @@ fn setup_rtos() {
 //  d_println!(get_debug_log(), "sys_timer_hz : {}", _sys_timer_hz);
 
 
-//  let default_task_attributes  = cmsis_rtos2::osThreadAttr_t {
-//    name: "defaultTask\0".as_ptr(),
-//    attr_bits: 0,
-//    cb_mem: core::ptr::null_mut(),
-//    cb_size: 0,
-//    stack_mem: core::ptr::null_mut(),
-//    stack_size: 128,
-//    priority:  cmsis_rtos2::osPriority_t_osPriorityNormal,
-//    tz_module: 0,
-//    reserved: 0,
-//  };
-
-  // We don't pass context to the default task here, since that involves problematic
-  // casting to/from C void pointers; instead, we use global static context.
-//  let default_thread_id = cmsis_rtos2::rtos_os_thread_new(
-//    Some(start_default_task),
-//    core::ptr::null_mut(),
-//    core::ptr::null(),
-//  );
-//
-//  if default_thread_id.is_null() {
-//    d_println!(get_debug_log(), "rtos_os_thread_new failed!");
-//    return core::ptr::null_mut()
-//  }
-  //d_println!(get_debug_log(), "rtos_os_thread_new ok! ");
-
   setup_repeating_timer();
+  setup_default_threads();
 
   let _rc = cmsis_rtos2::rtos_kernel_start();
   d_println!(get_debug_log(), "kernel_start rc: {}", _rc);
@@ -247,7 +274,10 @@ fn main() -> ! {
   setup_rtos();
 
   loop {
-    cmsis_rtos2::rtos_os_thread_yield();
+    //cmsis_rtos2::rtos_os_thread_yield();
+    //one hz heartbeat
+    cmsis_rtos2::rtos_os_delay(1000);
+    d_print!(get_debug_log(),".");
   }
 
 }
