@@ -17,8 +17,6 @@ use stm32f4xx_hal as processor_hal;
 //use stm32h7xx_hal::pac as pac;
 
 
-
-
 #[macro_use]
 extern crate cortex_m_rt;
 
@@ -67,7 +65,8 @@ use processor_hal::rcc::RccExt;
 use core::ops::{DerefMut};
 
 use processor_hal::{prelude::*, stm32};
-//use core::ptr::null;
+use core::ptr::{null, null_mut};
+use cmsis_rtos2::{ osMessageQueueId_t};
 
 #[cfg(debug_assertions)]
 type DebugLog = cortex_m_log::printer::semihosting::Semihosting<cortex_m_log::modes::InterruptFree, cortex_m_semihosting::hio::HStdout>;
@@ -79,13 +78,14 @@ type GpioTypeUserLed1 =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::O
 static APP_CLOCKS:  Mutex<RefCell< Option< Clocks >>> = Mutex::new(RefCell::new(None));
 static USER_LED_1:  Mutex<RefCell<Option< GpioTypeUserLed1>>> = Mutex::new(RefCell::new(None));
 
-//static GLOBAL_QUEUE_HANDLE: Mutex<RefCell<Option< cmsis_rtos2::osMessageQueueId_t  >>> = Mutex::new(RefCell::new(None));
+// static GLOBAL_QUEUE_HANDLE: Mutex<RefCell<Option< cmsis_rtos2::MsgQueue  >>> = Mutex::new(RefCell::new(None));
+static mut GLOBAL_QUEUE_HANDLE: Option< osMessageQueueId_t  > = None;
 
 // cortex-m-rt is setup to call DefaultHandler for a number of fault conditions
 // we can override this in debug mode for handy debugging
 #[exception]
 fn DefaultHandler(_irqn: i16) {
-  d_println!(get_debug_log(), "IRQn = {}", _irqn);
+  //d_println!(get_debug_log(), "IRQn = {}", _irqn);
 
 }
 
@@ -105,6 +105,8 @@ fn get_debug_log() -> DebugLog {
   semihosting::InterruptFree::<_>::stdout().unwrap()
 }
 
+
+
 // Toggle the user leds from their prior state
 fn toggle_leds() {
   interrupt::free(|cs| {
@@ -119,8 +121,19 @@ fn toggle_leds() {
 extern "C" fn task1_cb(_arg: *mut cty::c_void) {
   //d_println!(get_debug_log(), "task1");
 
+  let mq_id:osMessageQueueId_t = unsafe { GLOBAL_QUEUE_HANDLE.unwrap() } ;
+
+  let mut msg: [u8; 10] = [0; 10];
   loop {
     cmsis_rtos2::rtos_os_delay(100);
+      cmsis_rtos2::rtos_os_msg_queue_put(
+        mq_id as osMessageQueueId_t,
+        msg.as_ptr() as *const cty::c_void,
+        1,
+        500);
+
+    msg[0] += 1;
+
   }
   
 }
@@ -129,8 +142,22 @@ extern "C" fn task1_cb(_arg: *mut cty::c_void) {
 extern "C" fn task2_cb(_arg: *mut cty::c_void) {
   //d_println!(get_debug_log(), "task2");
 
+  let mq_id:osMessageQueueId_t = unsafe { GLOBAL_QUEUE_HANDLE.unwrap() } ;
+
+  let mut msg: [u8; 32] = [0; 32];
+
   loop {
-    cmsis_rtos2::rtos_os_delay(250);
+    cmsis_rtos2::rtos_os_delay(100);
+    let rc = cmsis_rtos2::rtos_os_msg_queue_get(mq_id,
+                                                msg.as_mut_ptr() as *mut cty::c_void,
+                                                null_mut(),500);
+    if 0 == rc {
+      toggle_leds();
+      // interrupt::free(|_cs| {
+      //   d_println!(get_debug_log(), "{}", msg[0]);
+      // });
+    }
+
   }
 
 }
@@ -142,7 +169,7 @@ extern "C" fn repeating_timer_task(_arg: *mut cty::c_void) {
 }
 
 
-fn setup_repeating_timer() {
+pub fn setup_repeating_timer() {
   let tid = cmsis_rtos2::rtos_os_timer_new(
     Some(repeating_timer_task),
     cmsis_rtos2::osTimerType_t_osTimerPeriodic,
@@ -178,19 +205,16 @@ pub fn setup_default_threads() {
 //    reserved: 0,
 //  };
 
-//  //create a shared msg queue
-//  let mq_id = cmsis_rtos2::rtos_os_msg_queue_new(512, 1, null());
-//  if mq_id.is_null() {
-//    d_println!(get_debug_log(), "rtos_os_msg_queue_new failed");
-//    return;
-//  }
-//  else {
-//    d_println!(get_debug_log(), "new queue: {:?}", mq_id);
-//  }
+ //create a shared msg queue
+ let mq = cmsis_rtos2::rtos_os_msg_queue_new(10, 4, null());
+ if mq.is_null() {
+   d_println!(get_debug_log(), "rtos_os_msg_queue_new failed");
+   return;
+ }
 
-//  interrupt::free(|cs| {
-//    GLOBAL_QUEUE_HANDLE.borrow(cs).replace(Some(mq_id));
-//  });
+ unsafe {
+   GLOBAL_QUEUE_HANDLE = Some(mq);
+ }
 
   // We don't pass context to the default task here, since that involves problematic
   // casting to/from C void pointers; instead, we use global static context.
@@ -217,7 +241,7 @@ pub fn setup_default_threads() {
 
 // Setup peripherals such as GPIO
 fn setup_peripherals()  {
-  d_print!(get_debug_log(), "setup_peripherals...");
+  //d_print!(get_debug_log(), "setup_peripherals...");
 
   let dp = stm32::Peripherals::take().unwrap();
 
@@ -239,7 +263,7 @@ fn setup_peripherals()  {
     USER_LED_1.borrow(cs).replace(Some(user_led1));
   });
 
-  d_println!(get_debug_log(), "done!");
+  //d_println!(get_debug_log(), "done!");
 
 }
 
@@ -258,7 +282,7 @@ fn setup_rtos() {
 
 
   setup_repeating_timer();
-  setup_default_threads();
+  //setup_default_threads();
 
   let _rc = cmsis_rtos2::rtos_kernel_start();
   d_println!(get_debug_log(), "kernel_start rc: {}", _rc);
