@@ -50,18 +50,11 @@ use cortex_m_log::printer::semihosting;
 use cortex_m_semihosting;
 
 
-//use processor_hal::pwr::{Pwr, VoltageScale};
-
-//use processor_hal::rcc::Ccdr;
 use processor_hal::rcc::Clocks;
-
-//use processor_hal::rcc::CoreClocks;
-//use processor_hal::rcc::Rcc;
 
 use processor_hal::gpio::GpioExt;
 use processor_hal::rcc::RccExt;
 
-//use cmsis_rtos2::{osThreadId_t};
 use core::ops::{DerefMut};
 
 use processor_hal::{prelude::*, stm32};
@@ -78,15 +71,13 @@ type GpioTypeUserLed1 =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::O
 static APP_CLOCKS:  Mutex<RefCell< Option< Clocks >>> = Mutex::new(RefCell::new(None));
 static USER_LED_1:  Mutex<RefCell<Option< GpioTypeUserLed1>>> = Mutex::new(RefCell::new(None));
 
-// static GLOBAL_QUEUE_HANDLE: Mutex<RefCell<Option< cmsis_rtos2::MsgQueue  >>> = Mutex::new(RefCell::new(None));
 static mut GLOBAL_QUEUE_HANDLE: Option< osMessageQueueId_t  > = None;
 
 // cortex-m-rt is setup to call DefaultHandler for a number of fault conditions
 // we can override this in debug mode for handy debugging
 #[exception]
 fn DefaultHandler(_irqn: i16) {
-  //d_println!(get_debug_log(), "IRQn = {}", _irqn);
-
+  d_println!(get_debug_log(), "IRQn = {}", _irqn);
 }
 
 
@@ -119,43 +110,32 @@ fn toggle_leds() {
 /// RTOS calls this function to run the default task
 #[no_mangle]
 extern "C" fn task1_cb(_arg: *mut cty::c_void) {
-  //d_println!(get_debug_log(), "task1");
-
   let mq_id:osMessageQueueId_t = unsafe { GLOBAL_QUEUE_HANDLE.unwrap() } ;
-
-  let mut msg: [u8; 10] = [0; 10];
+  let mut send_buf: [u8; 10] = [0; 10];
   loop {
-    cmsis_rtos2::rtos_os_delay(100);
-      cmsis_rtos2::rtos_os_msg_queue_put(
-        mq_id as osMessageQueueId_t,
-        msg.as_ptr() as *const cty::c_void,
-        1,
-        500);
+    cmsis_rtos2::rtos_os_msg_queue_put(
+      mq_id as osMessageQueueId_t,
+      send_buf.as_ptr() as *const cty::c_void,
+      1,
+      250);
 
-    msg[0] += 1;
-
+    send_buf[0] = (send_buf[0] + 1) % 255;
   }
-  
+
 }
 
 #[no_mangle]
 extern "C" fn task2_cb(_arg: *mut cty::c_void) {
-  //d_println!(get_debug_log(), "task2");
-
   let mq_id:osMessageQueueId_t = unsafe { GLOBAL_QUEUE_HANDLE.unwrap() } ;
-
-  let mut msg: [u8; 32] = [0; 32];
+  let mut recv_buf: [u8; 10] = [0; 10];
 
   loop {
-    cmsis_rtos2::rtos_os_delay(100);
     let rc = cmsis_rtos2::rtos_os_msg_queue_get(mq_id,
-                                                msg.as_mut_ptr() as *mut cty::c_void,
-                                                null_mut(),500);
+                                                recv_buf.as_mut_ptr() as *mut cty::c_void,
+                                                null_mut(), 100);
     if 0 == rc {
       toggle_leds();
-      // interrupt::free(|_cs| {
-      //   d_println!(get_debug_log(), "{}", msg[0]);
-      // });
+      cmsis_rtos2::rtos_os_delay(50);
     }
 
   }
@@ -173,8 +153,8 @@ pub fn setup_repeating_timer() {
   let tid = cmsis_rtos2::rtos_os_timer_new(
     Some(repeating_timer_task),
     cmsis_rtos2::osTimerType_t_osTimerPeriodic,
-    core::ptr::null_mut(),
-    core::ptr::null(),
+    null_mut(),
+    null(),
   );
 
   if tid.is_null() {
@@ -193,35 +173,24 @@ pub fn setup_repeating_timer() {
 }
 
 pub fn setup_default_threads() {
-//  let default_task_attributes  = cmsis_rtos2::osThreadAttr_t {
-//    name: "defaultTask/0".as_ptr(),
-//    attr_bits: 0,
-//    cb_mem: core::ptr::null_mut(),
-//    cb_size: 0,
-//    stack_mem: core::ptr::null_mut(),
-//    stack_size: 128,
-//    priority:  cmsis_rtos2::osPriority_t_osPriorityIdle,
-//    tz_module: 0,
-//    reserved: 0,
-//  };
 
- //create a shared msg queue
- let mq = cmsis_rtos2::rtos_os_msg_queue_new(10, 4, null());
- if mq.is_null() {
+// create a shared msg queue
+  let mq = cmsis_rtos2::rtos_os_msg_queue_new(10, 4, null());
+  if mq.is_null() {
    d_println!(get_debug_log(), "rtos_os_msg_queue_new failed");
    return;
- }
+  }
 
- unsafe {
+  unsafe {
    GLOBAL_QUEUE_HANDLE = Some(mq);
- }
+  }
 
   // We don't pass context to the default task here, since that involves problematic
   // casting to/from C void pointers; instead, we use global static context.
   let thread1_id = cmsis_rtos2::rtos_os_thread_new(
     Some(task1_cb),
-    core::ptr::null_mut(),
-    core::ptr::null(),
+    null_mut(),
+    null(),
   );
   if thread1_id.is_null() {
     d_println!(get_debug_log(), "rtos_os_thread_new failed!");
@@ -230,8 +199,8 @@ pub fn setup_default_threads() {
 
   let thread2_id = cmsis_rtos2::rtos_os_thread_new(
     Some(task2_cb),
-    core::ptr::null_mut(),
-    core::ptr::null(),
+    null_mut(),
+    null(),
   );
   if thread2_id.is_null() {
     d_println!(get_debug_log(), "rtos_os_thread_new failed!");
@@ -255,7 +224,6 @@ fn setup_peripherals()  {
 
   //set initial states of user LEDs
   user_led1.set_high().unwrap();
-
 
   //store shared peripherals
   interrupt::free(|cs| {
@@ -281,8 +249,8 @@ fn setup_rtos() {
 //  d_println!(get_debug_log(), "sys_timer_hz : {}", _sys_timer_hz);
 
 
-  setup_repeating_timer();
-  //setup_default_threads();
+//  setup_repeating_timer();
+  setup_default_threads();
 
   let _rc = cmsis_rtos2::rtos_kernel_start();
   d_println!(get_debug_log(), "kernel_start rc: {}", _rc);
