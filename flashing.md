@@ -6,7 +6,7 @@ install latest openocd:
 
 with one shell:
 
-`openocd -f interface/stlink.cfg -f target/stm32h7x.cfg`
+`openocd`
 
 with another shell:
 
@@ -14,8 +14,4 @@ with another shell:
 
 then:
 
-```
-target remote :3333
-load
-c
-```
+
