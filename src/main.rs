@@ -1,4 +1,4 @@
-#![deny(warnings)]
+// #![deny(warnings)]
 //#![deny(unsafe_code)]
 #![no_main]
 #![no_std]
@@ -11,23 +11,17 @@ extern crate panic_semihosting;
 use core::cell::RefCell;
 use cortex_m::interrupt::{self, Mutex};
 
-//use stm32h7xx_hal as processor_hal;
-use stm32f4xx_hal as processor_hal;
-
-//use stm32h7xx_hal::pac as pac;
+use stm32f7xx_hal as p_hal;
 
 
-#[macro_use]
-extern crate cortex_m_rt;
+use cortex_m_rt as rt;
+use rt::{entry, exception, ExceptionFrame};
 
-use cortex_m_rt::{entry, ExceptionFrame};
+//use p_hal::hal::digital::v2::OutputPin;
+use embedded_hal::digital::v2::ToggleableOutputPin;
+//use p_hal::hal::digital::v2::InputPin;
 
-//use processor_hal::hal::digital::v2::OutputPin;
-use processor_hal::hal::digital::v2::ToggleableOutputPin;
-//use processor_hal::hal::digital::v2::InputPin;
-
-
-use cmsis_rtos2;
+use freertos_rsbuild::cmsis_rtos2;
 
 #[allow(non_upper_case_globals)]
 #[no_mangle]
@@ -50,23 +44,27 @@ use cortex_m_log::printer::semihosting;
 use cortex_m_semihosting;
 
 
-use processor_hal::rcc::Clocks;
+use p_hal::rcc::Clocks;
 
-use processor_hal::gpio::GpioExt;
-use processor_hal::rcc::RccExt;
+use p_hal::gpio::GpioExt;
+use p_hal::rcc::RccExt;
 
 use core::ops::{DerefMut};
 
-use processor_hal::{prelude::*, stm32};
+use p_hal::{prelude::*};
+use p_hal::device as pac;
+
 use core::ptr::{null, null_mut};
 use cmsis_rtos2::{ osMessageQueueId_t};
+use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode};
 
 #[cfg(debug_assertions)]
 type DebugLog = cortex_m_log::printer::semihosting::Semihosting<cortex_m_log::modes::InterruptFree, cortex_m_semihosting::hio::HStdout>;
 
 //TODO this kind of hardcoding is not ergonomic
 
-type GpioTypeUserLed1 =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
+// type GpioTypeUserLed1 =  p_hal::gpio::gpioc::PC13<p_hal::gpio::Output<p_hal::gpio::PushPull>>;
+type GpioTypeUserLed1 =  p_hal::gpio::gpiob::PB1<p_hal::gpio::Output<p_hal::gpio::PushPull>>;
 
 static APP_CLOCKS:  Mutex<RefCell< Option< Clocks >>> = Mutex::new(RefCell::new(None));
 static USER_LED_1:  Mutex<RefCell<Option< GpioTypeUserLed1>>> = Mutex::new(RefCell::new(None));
@@ -75,19 +73,19 @@ static mut GLOBAL_QUEUE_HANDLE: Option< osMessageQueueId_t  > = None;
 
 // cortex-m-rt is setup to call DefaultHandler for a number of fault conditions
 // we can override this in debug mode for handy debugging
-#[exception]
-fn DefaultHandler(_irqn: i16) {
-  d_println!(get_debug_log(), "IRQn = {}", _irqn);
-}
+// #[exception]
+// fn DefaultHandler(_irqn: i16) {
+//   d_println!(get_debug_log(), "IRQn = {}", _irqn);
+// }
 
 
-// cortex-m-rt calls this for serious faults.  can set a breakpoint to debug
-#[exception]
-fn HardFault(_ef: &ExceptionFrame) -> ! {
-  loop {
-
-  }
-}
+// // cortex-m-rt calls this for serious faults.  can set a breakpoint to debug
+// #[exception]
+// fn HardFault(_ef: &ExceptionFrame) -> ! {
+//   loop {
+//
+//   }
+// }
 
 
 /// Used in debug builds to provide a logging outlet
@@ -212,14 +210,25 @@ pub fn setup_default_threads() {
 fn setup_peripherals()  {
   //d_print!(get_debug_log(), "setup_peripherals...");
 
-  let dp = stm32::Peripherals::take().unwrap();
+  let dp = pac::Peripherals::take().unwrap();
 
-  let gpioc = dp.GPIOC.split();
-  let mut user_led1 = gpioc.pc13.into_push_pull_output();
+  let rcc = dp.RCC.constrain();
+  let clocks = rcc
+      .cfgr
+      .hse(HSEClock::new(16.mhz(), HSEClockMode::Oscillator)) // 16 MHz xtal
+      .sysclk(216.mhz()) // HCLK
+      .timclk1(54.mhz()) // APB1 clock (PCLK1) is HCLK/4
+      .timclk2(108.mhz()) // APB2 clock (PCLK2) is HCLK/2
+      .freeze();
+
+  let gpiob = dp.GPIOB.split();
+  // let gpioc = dp.GPIOC.split();
+  // let mut user_led1 = gpioc.pc13.into_push_pull_output();
+  let mut user_led1 = gpiob.pb1.into_push_pull_output(); //red
 
   // Set up the system clock at 16 MHz
-  let rcc = dp.RCC.constrain();
-  let clocks = rcc.cfgr.freeze();
+  // let rcc = dp.RCC.constrain();
+  // let clocks = rcc.cfgr.freeze();
 //  let clocks = rcc.cfgr.sysclk(16.mhz()).freeze();
 
   //set initial states of user LEDs
