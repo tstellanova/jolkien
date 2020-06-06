@@ -5,22 +5,14 @@
 
 extern crate panic_semihosting;
 
-
 use core::cell::RefCell;
 use cortex_m::interrupt::{self, Mutex};
 
-use stm32f4xx_hal as processor_hal;
+use stm32f4xx_hal as p_hal;
 
+use cortex_m_rt::{entry, exception, ExceptionFrame};
 
-
-#[macro_use]
-extern crate cortex_m_rt;
-
-use cortex_m_rt::{entry, ExceptionFrame};
-
-//use processor_hal::hal::digital::v2::OutputPin;
-use processor_hal::hal::digital::v2::ToggleableOutputPin;
-//use processor_hal::hal::digital::v2::InputPin;
+use p_hal::hal::digital::v2::ToggleableOutputPin;
 
 use freertos_sys::cmsis_rtos2;
 
@@ -45,14 +37,14 @@ use cortex_m_log::printer::semihosting;
 use cortex_m_semihosting;
 
 
-use processor_hal::rcc::Clocks;
+use p_hal::rcc::Clocks;
 
-use processor_hal::gpio::GpioExt;
-use processor_hal::rcc::RccExt;
+use p_hal::gpio::GpioExt;
+use p_hal::rcc::RccExt;
 
 use core::ops::{DerefMut};
 
-use processor_hal::{prelude::*, stm32};
+use p_hal::{prelude::*, stm32};
 use core::ptr::{null, null_mut};
 use cmsis_rtos2::{ osMessageQueueId_t};
 
@@ -61,7 +53,7 @@ type DebugLog = cortex_m_log::printer::semihosting::Semihosting<cortex_m_log::mo
 
 //TODO this kind of hardcoding is not ergonomic
 
-type GpioTypeUserLed1 =  processor_hal::gpio::gpioc::PC13<processor_hal::gpio::Output<processor_hal::gpio::PushPull>>;
+type GpioTypeUserLed1 =  p_hal::gpio::gpioc::PC13<p_hal::gpio::Output<p_hal::gpio::PushPull>>;
 
 static APP_CLOCKS:  Mutex<RefCell< Option< Clocks >>> = Mutex::new(RefCell::new(None));
 static USER_LED_1:  Mutex<RefCell<Option< GpioTypeUserLed1>>> = Mutex::new(RefCell::new(None));
@@ -84,6 +76,10 @@ fn HardFault(_ef: &ExceptionFrame) -> ! {
   }
 }
 
+#[no_mangle]
+extern "C" fn handle_assert_failed() {
+  d_println!(get_debug_log(), "handle_assert_failed");
+}
 
 /// Used in debug builds to provide a logging outlet
 #[cfg(debug_assertions)]

@@ -1,3 +1,5 @@
+/* memory file for stm32f401cxux */
+
 MEMORY
 {
   /* FLASH and RAM are mandatory memory regions */
