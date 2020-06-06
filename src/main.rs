@@ -2,7 +2,6 @@
 #![no_main]
 #![no_std]
 
-//extern crate panic_itm;
 
 extern crate panic_semihosting;
 
@@ -10,10 +9,8 @@ extern crate panic_semihosting;
 use core::cell::RefCell;
 use cortex_m::interrupt::{self, Mutex};
 
-//use stm32h7xx_hal as processor_hal;
 use stm32f4xx_hal as processor_hal;
 
-//use stm32h7xx_hal::pac as pac;
 
 
 #[macro_use]
@@ -25,8 +22,7 @@ use cortex_m_rt::{entry, ExceptionFrame};
 use processor_hal::hal::digital::v2::ToggleableOutputPin;
 //use processor_hal::hal::digital::v2::InputPin;
 
-
-use cmsis_rtos2;
+use freertos_sys::cmsis_rtos2;
 
 #[allow(non_upper_case_globals)]
 #[no_mangle]
