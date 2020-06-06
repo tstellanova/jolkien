@@ -7,12 +7,12 @@ edition = "2018"
 build = "build.rs"
 
 [dependencies]
+cmsis-rtos2 = "0.1.1"
+#cmsis-rtos2 = { path = "../cmsis_rtos2_rs" }
+#cmsis-rtos2  = { git = "https://github.com/tstellanova/cmsis_rtos2_rs.git" }
 cty = "0.2.1"
 cortex-m = "^0.6.0"
 cortex-m-rt = "0.6.11"
-
-#cmsis-rtos2 = { path = "../cmsis_rtos2_rs" }
-cmsis-rtos2  = { git = "https://github.com/tstellanova/cmsis_rtos2_rs.git" }
 
 cortex-m-log = { version = "0.6.1", features = ["log-integration", "itm", "semihosting"] }
 #panic-itm = "~0.4.1"
